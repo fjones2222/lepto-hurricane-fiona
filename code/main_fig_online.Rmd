@@ -1,0 +1,709 @@
+---
+title: Main figures for Leptospirosis outbreak after Hurricane Fiona, Puerto
+  Rico, 2022
+author: "Forrest Jones"
+date: "`r Sys.Date()`"
+output: word_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE,message=FALSE, eval = TRUE)
+```
+
+```{r initiate, eval=TRUE}
+
+source("code/R/functions.R")
+source("code/R/load_data.R")
+
+```
+
+
+
+
+
+## Abstract
+
+```{r abstract}
+
+clean_linelist %>%
+  filter(new_status %in% c("Probable","Confirmed"))%>%
+  group_by(Period_simple)%>%
+  summarize(cases=n(),
+  Contact.Water.Yes=round(100*mean(Contact.with.Water=="Yes"))
+            ) %>%
+  ungroup()%>%
+  mutate(weeks=ifelse(Period_simple=="After Fiona",15,37)) %>%
+  mutate(rate=cases/weeks) %>%
+  mutate(IRR=round(max(rate)/rate,1)) %>%
+  mutate(rate=round(rate,1))
+
+clean_linelist %>%
+  filter(Tested) %>%
+  count(Period_simple) %>%
+  mutate(weeks=ifelse(Period_simple=="After Fiona",15,37)) %>%
+  mutate(round(n/weeks))
+
+
+```
+
+## Epidemiologic Investigation and Results
+
+```{r newinvestigation-1}
+
+clean_linelist %>%
+  filter(Period_simple=="After Fiona")%>%
+  summarize(
+    reports=n(),
+    IgM=sum(IgM %in% c("Positive","Negative")),
+    PCR=sum(PCR %in% c("Positive","Negative")),
+    positives=sum(new_status %in% c("Confirmed","Probable")),
+    Confirmed=sum(new_status %in% c("Confirmed")),
+    Probable=sum(new_status %in% c("Probable"))
+  )
+
+
+clean_linelist %>%
+  filter(Period_simple=="After Fiona")%>%
+    filter(!new_status %in% c("Confirmed","Probable")) %>%
+  summarize(
+    reports=n(),
+    Tested=sum(Tested)
+  )
+
+clean_linelist %>%
+    filter(new_status %in% c("Confirmed","Probable")) %>%
+  filter(Period_simple=="After Fiona")%>%
+    summarise(
+              median_age=glue("{median(age_year)} {quantile(age_year,0.25)}-{quantile(age_year,0.75)}"),
+              male_sex=glue("{sum(sex=='Male')} {round(mean(sex=='Male'),2)}")
+              )
+
+
+clean_linelist %>%
+      filter(Period_simple=="After Fiona")%>%
+    filter(new_status %in% c("Confirmed","Probable")) %>%
+  select(
+Fever,
+  
+  Myalgia, Headache,  Conjunctivitis, Thrombocytopenia,
+  Rash, Jaundiced,Persistent.Vomiting, Abdominal.Pain,
+  Severe.Bleeding,Nausea, Diarrhea, Skin.lesion,
+  Renal.failure,
+  Dialysis,
+  Liver.failure,
+  `Risk.Factor.Meningitis`,
+  Cardio.Respiratory.Failure,
+  Mechanical.Ventilation) %>%
+  gather(symptom,response) %>%
+  group_by(symptom) %>%
+  summarize(total=sum(response=="Yes"),
+            percent=round(mean(response=="Yes"),2)
+            ) %>%
+  arrange(-percent)
+
+
+clean_linelist %>%
+    filter(new_status %in% c("Confirmed","Probable")) %>%
+    filter(Period_simple=="After Fiona")%>%
+    summarise(
+              death=glue("{sum(death=='Yes')} {round(mean(death=='Yes'),2)}"),
+              hospitalized=glue("{sum(hospitalized=='Yes')} {round(mean(hospitalized=='Yes'),2)}"),
+              antibiotic_status=glue("{sum(antibiotic_status=='Yes')} {round(mean(antibiotic_status=='Yes'),2)}")
+              )
+
+
+clean_linelist %>%
+  filter(Period_simple=="After Fiona") %>%
+  filter(new_status %in% c("Probable","Confirmed")) %>%
+  count(new_status,dengue_status) %>%
+  mutate(percent=round(n/sum(n),2))
+
+
+```
+
+
+```{r newinvestigation-2}
+
+
+
+clean_linelist %>%
+    filter(new_status %in% c("Probable","Confirmed"))%>%
+    filter(Period_simple=="After Fiona")%>%
+    count(case_week) %>%
+    mutate(case_week_end=case_week+6)%>%
+    filter(case_week_end<=as.Date("2022-10-22")) %>%
+    mutate(avg=mean(n))
+
+
+#negative binomial regression
+weeks <- data.frame(case_week=seq(min(clean_linelist$onset_date_imputed),max(clean_linelist$onset_date_imputed),7)) %>%
+    mutate(case_week=floor_date(case_week,"weeks")) %>%
+  mutate(Period_simple=ifelse(case_week>date_fiona,"After Fiona","Before Fiona"))
+
+
+n_week <- clean_linelist %>%
+  filter(new_status %in% c("Probable","Confirmed"))%>%
+  group_by(Period_simple,case_week) %>%
+  summarise(
+            pos_cases=sum(new_status %in% c("Probable","Confirmed")),
+          ) %>% 
+  ungroup() %>%
+  right_join(weeks,by = c("Period_simple", "case_week")) %>%
+  mutate(pos_cases=ifelse(is.na(pos_cases),0,pos_cases)) %>%
+  mutate(Period_simple=fct_rev(Period_simple))
+
+
+
+nb_fit<- MASS::glm.nb(pos_cases ~ Period_simple, data=n_week)
+
+n_week %>% group_by(Period_simple) %>%
+  summarize(rate=round(mean(pos_cases),1))
+
+
+broom::tidy(nb_fit,conf.int = TRUE,exponentiate=TRUE) %>%
+  filter(str_detect(term,"Period_simple")) %>%
+  mutate(out=glue("{round(estimate,1)} ({round(conf.low,1)}-{round(conf.high,1)})")) %>%
+  pull(out)
+
+
+clean_linelist %>%
+  filter(Period_simple=="Before Fiona")%>%
+  filter(new_status!="Suspect")%>%
+  count(new_status) %>%
+  mutate(total=sum(n))%>%
+  mutate(percent=round(n/total,2))
+
+
+```
+
+### Figure 1
+
+```{r figure-1-rainfall}
+
+
+weekly_case_counts <- clean_linelist_original %>%
+  count(case_week,new_status) %>%
+  mutate(`Case Classification`=factor(new_status,levels=c("Confirmed","Probable","Suspect") )) %>%
+  filter(case_week >= as.Date("2021-01-01")) %>%
+  filter(case_week<as.Date("2023-10-01"))#%>%
+  # left_join(chirps_data, by="case_week")
+
+possible_weeks <- data.frame(case_week=seq(min(weekly_case_counts$case_week),max(weekly_case_counts$case_week)+7,by=1) %>%
+  lubridate::floor_date("weeks") %>%
+  unique())
+
+weekly_case_counts %>%
+  filter(new_status %in% c("Confirmed","Probable"))%>%
+  group_by(case_week)%>%
+  summarize(n=sum(n))%>%
+  right_join(possible_weeks) %>%
+  filter(case_week >= as.Date("2021-01-01")) %>%
+  filter(case_week<as.Date("2023-10-01")) %>%
+  mutate(n=ifelse(is.na(n),
+                  0,n
+                  )) %>%
+  mutate(yr=year(case_week)) %>%
+  group_by(yr)%>%
+  summarize(round(mean(n),1))
+
+
+chirps_data_raw <- read_excel("data/chirps/CHIRPS_precipitation_PR_adm0.xlsx") %>%
+    mutate(Date=as.Date(Date),
+           rainfall=as.numeric(CHIRPS_precipitation_avg_mm)
+           )
+
+chirps_data<-  chirps_data_raw%>%
+  filter(year(Date)>2020 & Date<=as.Date("2023-10-01"))%>%
+    mutate(case_week=floor_date(as.Date(Date),"weeks"))%>%
+    group_by(case_week)%>%
+    summarize(rainfall=sum(as.numeric(CHIRPS_precipitation_avg_mm))) 
+
+
+
+ec_axis_breaks <- seq(min(weekly_case_counts$case_week),max(weekly_case_counts$case_week)+7,by=1) %>%
+  lubridate::floor_date("months") %>% unique()
+
+ec_axis_breaks <- c(ec_axis_breaks,lubridate::floor_date(max(ec_axis_breaks)+5*7,"months")) %>%
+  floor_date("2 months") %>% unique()
+
+ec_axis_labels <-  ec_axis_breaks %>% 
+                    format("%b %d, %Y") %>%
+                    str_replace_all("01","1") 
+
+# ec_axis_labels <-  ec_axis_breaks %>% 
+#                     format("%b %d\n(%Y)") %>%
+#                     str_replace_all("01","1") %>%
+#                     str_remove_all("\\\n\\(2022\\)")
+
+hurricane_icon<- jpeg::readJPEG("data/noaastormevents/hurricane_icon.jpeg")
+
+
+ec <- weekly_case_counts %>% 
+  filter(`Case Classification`!="Suspect")%>%
+  mutate(`Case Classification` =fct_rev(`Case Classification`))%>%
+  mutate(tile=-1)%>%
+  ggplot()+
+  geom_col(
+           lwd=0.3,col="black",
+           aes(x=case_week,y=n,fill=`Case Classification`))+
+  geom_vline(xintercept = date_fiona-3,lwd=0.5,lty=2)+
+  scale_fill_manual("Case Classification",
+                    values = c("#8FAADC","#185394")
+                    )+
+  scale_x_date("Week of symptom onset",
+                     breaks=ec_axis_breaks,
+                     labels =ec_axis_labels
+                     )+
+  # scale_color_distiller("Millimeters of rainfall",
+  #                     palette="Greys",direction=1
+  #                    )+
+  scale_y_continuous("No. of cases",breaks=seq(0,20,5),
+                     limits = c(0,20)
+                     )+  
+  theme_cowplot()+
+  theme(
+        legend.position="bottom",
+        axis.text.x = element_text(angle=45,hjust=1)
+        )
+
+
+rainfall_plot <-chirps_data %>%
+  ggplot(aes(y=rainfall,x=case_week))+
+  geom_line()+
+  geom_point()+
+  geom_vline(xintercept = date_fiona-3,lwd=0.5,lty=2)+
+  geom_text(aes(label="Hurricane Fiona\nmakes landfall",
+                y=250,x=date_fiona-7
+                ),hjust=1
+            )+
+  scale_x_date("Week of symptom onset",
+                     breaks=ec_axis_breaks,
+                     labels =ec_axis_labels
+                     )+
+  scale_y_continuous("Millimeters\nof rainfall",breaks=seq(0,300,100),
+                     limits = c(0,300)
+                     )+
+  theme_cowplot()+
+  theme(
+        legend.position="bottom",
+        axis.text.x = element_blank(),
+        axis.title.x = element_blank()
+        )
+
+
+figure_1 <- plot_grid(rainfall_plot,ec,nrow=2,
+                      rel_heights = c(1,2.8),
+                      align = "v",
+                      labels = c("A","B")
+                      )
+
+figure_1
+
+
+ggsave(filename="output/mmwr_report/final_figures/figure_1.pdf",
+       plot=figure_1,
+       width = 9,
+       height=6
+       )
+
+ggsave(filename="output/mmwr_report/final_figures/figure_1.eps",
+       plot=figure_1,
+       width = 9,
+       height=6
+       )
+
+ggsave(filename="output/mmwr_report/final_figures/figure_1.svg",
+       plot=figure_1,
+       width = 9,
+       height=6
+       )
+
+
+# ggsave(filename="output/mmwr_report/figure_1_rainfall.pdf",
+#        plot=ec,
+#        width = 8,
+#        height=5)
+# 
+# weekly_case_counts %>% 
+#   filter(`Case Classification`!="Suspect")%>%
+#   mutate(`Case Classification` =fct_rev(`Case Classification`)) %>%
+#   select(-new_status) %>%
+#   write_csv("data/figure1_data/cases.csv")
+# 
+# chirps_data%>%
+#   filter(type=="case_week")%>%
+#   write_csv("data/figure1_data/rainfall.csv")
+
+
+```
+
+
+
+### Table
+
+```{r table}
+
+library(gtsummary)
+t1_obj <- clean_linelist %>%
+  filter(new_status %in% c("Confirmed","Probable")) %>%
+  mutate(Period_title=ifelse(Period_simple=="Before Fiona",
+                             "37 weeks before landfall of Hurricane Fiona",
+                             "15 weeks after landfall of Hurricane Fiona"
+                                                          ))%>%
+  mutate(Period_title=fct_rev(Period_title))%>%
+  mutate(`Recent Dengue Testing`=case_when(
+    dengue_status== "Confirmed" ~ "PCR Positive",
+    dengue_status== "Suspect" ~ "PCR or IgM Negative",
+    is.na(dengue_status) ~ "No dengue testing done"
+  ))%>%
+  mutate(`Testing Category`=as.character(`Testing Category`))%>%
+  #some symptoms were answered by aprior questions about additional symtpoms
+  mutate(across(Renal.failure:Mechanical.Ventilation,~ifelse(Additional.Symptoms=="No","No",.x)))%>%
+  select(Period_title,
+         `Case Classification`=new_status,
+         Age = age_year,
+         Sex=sex,
+        `Testing Category`,
+         Hospitalized=hospitalized,
+         Died=death,
+         `Received Antibiotic Treatment`=antibiotic_status,
+         `Contact with Potentially Contaminated Water`=Contact.with.Water,
+         `Contact with Potentially Contaminated Food`=Contact.with.Potentially.Contaminated.Food,
+         `Contact with Animals` = Contact.with.Animals,
+         `Had Occupational Risk Factor`= occupation_risk,
+         `Recent Dengue Testing`,
+
+         Fever,
+
+         Myalgia, Headache,  Conjunctivitis, Thrombocytopenia,
+         Rash, `Persistent Vomiting`=Persistent.Vomiting,
+         `Abdominal Pain`=Abdominal.Pain,
+         `Severe Bleeding`=Severe.Bleeding,Nausea, Diarrhea,
+         `Kidney failure`=Renal.failure,
+         `Liver failure`=Liver.failure,
+         Meningitis =`Risk.Factor.Meningitis`
+         )
+
+t1_obj %>%
+    # mutate(across(`Received Antibiotic Treatment`:Meningitis, ~ ifelse(.x=="Missing","No",.x))) %>%
+    tbl_summary(by=Period_title) %>%
+    add_p() %>%
+    bold_labels()
+
+#includes missing
+t1_obj %>%
+    tbl_summary(by=Period_title) %>%
+    add_p() %>%
+    bold_labels()%>%
+  as_flex_table() %>%
+  flextable::fontsize(size = 10,part="all")%>%
+  flextable::width(width = c(2.5,1.6,1.6,1))%>%
+  flextable::save_as_docx(path="output/mmwr_report/table_v1_missing.docx")
+
+#does not include missing
+t1_obj %>%
+    mutate(across(`Received Antibiotic Treatment`:Meningitis, ~ ifelse(.x=="Missing","No",.x))) %>%
+    tbl_summary(by=Period_title) %>%
+    add_p() %>%
+    bold_labels()%>%
+  as_flex_table() %>%
+  flextable::fontsize(size = 10,part="all")%>%
+  flextable::width(width = c(2.5,1.6,1.6,1))%>%
+  flextable::save_as_docx(path="output/mmwr_report/table_v1.docx")
+
+
+
+
+```
+
+```{r investigation-6}
+
+start <- floor_date(as.Date("2022-01-02"),"weeks")
+end <-  floor_date(as.Date("2022-12-31"),"weeks")
+
+
+
+
+AR_table <- clean_linelist %>% 
+  filter(new_status %in% c("Confirmed","Probable"))%>%
+  filter(year(onset_date_imputed)==2022) %>%
+  count(municipio,Period_simple) %>%
+  spread(Period_simple,n) %>%
+  right_join(sf::st_crop(pop20, xmin= -67.25, ymin= 17 ,xmax= -65 ,ymax= 19)) %>%
+  mutate(across(`Before Fiona`:`After Fiona`, .fns = ~ ifelse(is.na(.x),0,.x)))%>%
+  mutate(Before_AR = `Before Fiona`/value*10000,
+         After_AR = `After Fiona`/value*10000
+         ) %>%
+ mutate(Before_IR = Before_AR/37*365/7,
+         After_IR = After_AR/15*365/7
+         ) %>%
+  mutate(IR_difference=After_IR-Before_IR) %>%
+  mutate(before_label=ifelse(`Before Fiona`==0,"",as.character(`Before Fiona`)))%>%
+  mutate(after_label=ifelse(`After Fiona`==0,"",as.character(`After Fiona`))) %>%
+  mutate(before_IR_factor=cut(Before_IR,
+                              breaks=c(-1,0,0.1,0.3,1,3)*10,
+                              labels=c("0","0.1-1","1.1-3","3.1-10","10.1-30")
+                              
+                              ))%>%
+  mutate(after_IR_factor=cut(After_IR,
+                              breaks=c(-1,0,0.1,0.3,1,3)*10,
+                              labels=c("0","0.1-1","1.1-3","3.1-10","10.1-30")
+                              
+                              ))
+
+
+
+
+AR_table %>%
+  summarise(
+    inc_before=round(sum(`Before Fiona`)/sum(pop20$value)*10000/37*365/7,1),
+    inc_after=round(sum(`After Fiona`)/sum(pop20$value)*10000/15*365/7,1),
+    counties_before=glue("{sum(`Before Fiona`>0)} {round(mean(`Before Fiona`>0),2)}"),
+    counties_after=glue("{sum(`After Fiona`>0)} {round(mean(`After Fiona`>0),2)}"),
+    counties_both=glue("{sum(`After Fiona`>0&`Before Fiona`>0)} {round(mean(`After Fiona`>0&`Before Fiona`>0),2)}"),
+    IR_diff=glue("{round(median(IR_difference),1)}")
+  )
+```
+
+### Figure 2
+
+
+```{r figure-2}
+
+p1 <- AR_table %>%
+  st_as_sf() %>%
+  ggplot()+
+  geom_sf(aes(fill=before_IR_factor))+
+    scale_fill_manual("Cases per\n10,000 person-years",
+                         values = RColorBrewer::brewer.pal(5,"Blues")[1:4]
+                         )+
+  # geom_sf_text(aes(label=before_label))+
+  theme_void()+
+  ggspatial::annotation_scale(location = "br")+
+  theme(legend.position="none")+
+  ggtitle("         Before Hurricane Fiona (37 weeks)")
+
+
+#Historical Hurricane track
+#https://coast.noaa.gov/hurricanes/#map=4/32/-80
+
+fiona_track <- data.frame(date=as.Date(c("2022-09-18",
+                          "2022-09-18",
+                          "2022-09-18",
+                          "2022-09-19"
+                          )),
+           time=c("12Z","18Z","19Z","00Z"),
+           latitude=c(17.2033,
+                      17.8010,
+                      17.9991,
+                      18.1020
+                      ),
+           longitude=c(-66.1851,
+                       -66.8957,
+                       -67.0964,
+                       -67.7919
+                       )
+           )
+
+
+track_df <-data.frame(ID=1:4,X=fiona_track$longitude,Y=fiona_track$latitude) %>%
+  mutate(prevX=lag(X,1),
+         prevY=lag(Y,1)
+         ) %>%
+  filter(!is.na(prevX))
+
+rows <- split(track_df, seq(nrow(track_df)))
+lines <- lapply(rows, function(row) {
+  lmat <- matrix(unlist(row[2:5]), ncol = 2, byrow = TRUE)
+  st_linestring(lmat)
+})
+lines <- st_sfc(lines,crs="NAD83")
+track_sf <- st_sf('ID' = track_df$ID, 'geometry' = lines)
+
+
+track_sf <- track_sf %>% sf::st_crop(st_as_sf(AR_table) %>% st_bbox())  
+
+hurricane_icon<- jpeg::readJPEG("data/noaastormevents/hurricane_icon.jpeg")
+
+
+p2 <- AR_table %>%
+  st_as_sf() %>%
+  ggplot()+
+  geom_sf(aes(fill=after_IR_factor))+
+    scale_fill_brewer("Cases per\n10,000 person-years",
+                         direction = 1,
+                         palette = "Blues"
+                         )+
+  # geom_sf_text(aes(label=after_label))+
+  geom_text(aes(label="Hurricane Fiona",
+            x=-66.975,17.83)
+            )+
+  theme_void()+
+  ggtitle("           After Hurricane Fiona (15 weeks)") +
+  annotation_custom(rasterGrob(hurricane_icon), 
+                   xmin = -67.025, xmax = -66.925, 
+                   ymin = 17.83, ymax = 17.93)+
+    geom_sf(data=track_sf,
+            arrow = arrow( 
+                        ends = "first", 
+                        length = unit(0.2, "cm"))
+            )
+
+
+
+maps <- plot_grid(plot_grid(p1+ theme(legend.position="none"),
+                    p2 + theme(legend.position="none"),ncol=1,
+                    labels = c("A","B"),rel_heights = c(0.93,1)
+                    ),
+  get_legend(p2),rel_widths = c(8,1.5)
+
+  )
+
+maps
+
+
+
+ggsave(filename = "output/mmwr_report/final_figures/figure_2.pdf",
+       plot=maps,
+       width=9.5,
+       height=5
+       )
+
+ggsave(filename = "output/mmwr_report/final_figures/figure_2.svg",
+       plot=maps,
+       width=9.5,
+       height=5
+       )
+
+ggsave(filename = "output/mmwr_report/final_figures/figure_2.eps",
+       plot=maps,
+       width=9.5,
+       height=5
+       )
+
+
+
+```
+
+
+## Public health response
+
+## Discussion
+
+
+```{r discussion}
+
+after_fiona <- clean_linelist %>%
+                  filter(Period_simple=="After Fiona") %>%
+              select(patient_id,investigation_id,onset_date_imputed,new_status)
+
+
+after_fiona_negative_suspect <- clean_labs %>%
+  inner_join(after_fiona, by= "patient_id") %>% 
+  mutate(collection_date=as.Date(Date.Specimen.Collected)) %>% 
+  filter(test_name %in% c("PCR","IgM")) %>%
+  filter(new_status=="Suspect") %>%
+  filter(test_result=="Negative")
+
+ 
+ 
+after_fiona_negative_suspect%>%
+  mutate(diff=as.integer(collection_date-onset_date_imputed)) %>%
+  filter(diff<=180,diff>=0) %>%
+  group_by(investigation_id,new_status) %>%
+  summarize(
+    n=n(),
+    acute = sum(diff <=7 ,na.rm = TRUE),
+    convalescent_igm=sum(diff>7 & test_name=="IgM",na.rm = TRUE)
+  )  %>%
+  ungroup()%>%
+  summarize(
+    n_notmissing_day=n(),
+    acute_only = sum(acute>0 & convalescent_igm==0),
+    none = sum(acute==0 & convalescent_igm==0),
+    convalescent = sum(convalescent_igm>0),
+  ) %>%
+  mutate(n_total=nrow(count(after_fiona_negative_suspect,investigation_id))) %>%
+  mutate(percent=acute_only/n_total)
+  
+
+
+
+```
+
+## Supplement
+
+## Flowchart
+
+```{r}
+
+
+clean_linelist %>%
+    nrow()
+
+clean_linelist %>% 
+  count(Period_simple)
+
+clean_linelist %>%
+  count(Period_simple,`Testing Category`=="No testing") 
+
+clean_linelist %>%
+  filter(`Testing Category` != "No testing") %>%
+  filter(PCR!="Positive")%>%
+  filter(IgM!="Positive")%>%
+  count(Period_simple)
+
+clean_linelist %>%
+  filter(new_status %in% c("Confirmed","Probable")) %>%
+  count(Period_simple)
+
+
+clean_linelist %>%
+  filter(new_status %in% c("Confirmed","Probable")) %>%
+  count(Period_simple)
+
+```
+
+## OLD CODE
+
+
+```{r investigation-1}
+
+clean_linelist %>%
+  #filter using the create date
+  mutate(create=as.Date(Investigation.Create.Date)) %>%
+  filter(floor_date(create,"weeks") %in% as.Date(c("2022-09-18","2022-09-25"))) %>%
+  #only those with onset after hurricane fiona
+  filter(Period_simple=="After Fiona")%>%
+  summarise(
+    Cases=n(),
+    Confirmed=sum(new_status=="Confirmed"),
+    Probable=sum(new_status=="Probable"),
+    Suspect=sum(new_status=="Suspect"),
+    Hospitalized= sum(hospitalized=="Yes"),
+    Deaths=sum(death=="Yes"),
+    Contact.Water.Yes=sum(Contact.with.Water=="Yes"),
+    Contact.Water.data =sum(Contact.with.Water %in% c("Yes","No")),
+    PCR=sum(PCR=="Positive"),
+    IgM=sum(IgM=="Positive")
+  ) %>%
+  mutate(percent_water=round(Contact.Water.Yes/Contact.Water.data,2))
+
+```
+
+
+```{r investigation-3}
+
+clean_linelist %>%
+  group_by(Period_simple) %>%
+  summarize(first_day=min(case_week),
+            last_day=max(case_week)+6
+            ) %>%
+  mutate(total_weeks=as.numeric(last_day-first_day+1)/7)
+
+```
+
+
+
